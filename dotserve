@@ -1,0 +1,707 @@
+#!/usr/bin/env bash
+#
+# dotserve — start a dot-server, with a doorbell on the front door.
+#
+# dot-server is deeply configurable: cvars, flags, server.cfg, autoexec.cfg,
+# +command arguments, RCON, and layered configuration from file, environment and
+# argv. What it did not have was a way to start one without knowing all of that.
+#
+# This is that, and it is a launcher rather than a framework: it finds the Godot
+# runtime, picks a config directory, writes a commented server.cfg the first time,
+# opens the listener, and prints something a friend can paste.
+#
+# Usage:
+#   dotserve                            sensible defaults, prints a join URL
+#   dotserve --game res://games/arena   a specific game
+#   dotserve --port 27015 --web         also listen for browser clients
+#   dotserve --dry-run                  print the command and exit
+#
+# See --help for everything.
+
+set -euo pipefail
+
+readonly DOTSERVE_VERSION="0.1.0"
+
+# The oldest engine the dot-* family runs on. Below this, class_name resolution and
+# the .uid handling differ enough that a project silently fails to load rather than
+# reporting a version problem.
+readonly MIN_GODOT_MAJOR=4
+readonly MIN_GODOT_MINOR=4
+
+# Exit codes, so a supervisor can tell a misconfiguration from a crash.
+readonly EXIT_USAGE=2
+readonly EXIT_NO_GODOT=3
+readonly EXIT_NO_PROJECT=4
+readonly EXIT_CONFIG=5
+readonly EXIT_PORT=6
+
+# --- Defaults ---------------------------------------------------------------
+
+PROJECT_DIR=""
+GAME=""
+PORT=27015
+WS_PORT=0
+ENABLE_WEB=0
+HOSTNAME_VALUE=""
+MAXPLAYERS=16
+TICKRATE=64
+TAGS=""
+CONFIG_DIR=""
+LOG_DIR=""
+GODOT_BIN=""
+DRY_RUN=0
+PRINT_CONFIG=0
+RESTART=0
+RESTART_MAX=0
+QUIET=0
+NO_BANNER=0
+INSTALL_SERVICE=""
+PASSTHROUGH=()
+
+# --- Output -----------------------------------------------------------------
+
+# Colour only on a terminal. A launcher whose output is piped into a log file should
+# not fill it with escape sequences, and a systemd journal is exactly that.
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+  C_BOLD=$'\033[1m'; C_DIM=$'\033[2m'; C_RED=$'\033[31m'
+  C_GREEN=$'\033[32m'; C_YELLOW=$'\033[33m'; C_OFF=$'\033[0m'
+else
+  C_BOLD=""; C_DIM=""; C_RED=""; C_GREEN=""; C_YELLOW=""; C_OFF=""
+fi
+
+say()  { [ "$QUIET" -eq 1 ] || printf '%s\n' "$*"; }
+info() { [ "$QUIET" -eq 1 ] || printf '%s\n' "${C_DIM}$*${C_OFF}"; }
+warn() { printf '%swarning:%s %s\n' "$C_YELLOW" "$C_OFF" "$*" >&2; }
+fail() { printf '%serror:%s %s\n' "$C_RED" "$C_OFF" "$*" >&2; }
+
+die() {
+  local code="$1"; shift
+  fail "$*"
+  exit "$code"
+}
+
+usage() {
+  cat <<'USAGE'
+dotserve — start a dot-server
+
+  dotserve [options] [-- +command ...]
+
+Where the game is
+  --project DIR         Godot project to run. Default: the current directory, or
+                        the first ancestor containing a project.godot.
+  --game PATH           Game to load at boot, e.g. res://games/arena.
+  --godot PATH          Godot binary. Default: $GODOT, then PATH, then the usual
+                        install locations.
+
+Listening
+  --port N              UDP/ENet port for native clients. Default 27015.
+  --web                 Also listen on WebSocket, for browser clients.
+  --ws-port N           WebSocket port. Default: --port plus one.
+
+Identity
+  --name TEXT           Server name shown in listings.
+  --maxplayers N        Default 16.
+  --tickrate N          Default 64.
+  --tags TEXT           Free-form tags for a server listing.
+
+Where things live
+  --config DIR          Config directory. Default: $XDG_CONFIG_HOME/dotserve,
+                        then ~/.config/dotserve.
+  --log DIR             Log directory. Default: $XDG_STATE_HOME/dotserve/logs.
+
+Running
+  --restart             Restart on a crash, with exponential backoff.
+  --restart-max N       Give up after N restarts. Default: unlimited.
+  --dry-run             Print the command that would run, and exit.
+  --print-config        Print the resolved configuration, and exit.
+  --install-service [NAME]
+                        Print a systemd unit for this invocation, and exit.
+  --quiet               Only errors.
+  --no-banner           Skip the join-address banner.
+  -h, --help            This.
+  --version             Print the version.
+
+Anything after -- is passed to the server as-is, which is how a console command is
+run at boot:
+
+  dotserve -- +sv_cheats 1 +map dm_arena
+USAGE
+}
+
+# --- Argument parsing -------------------------------------------------------
+
+parse_args() {
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --project)      PROJECT_DIR="${2:-}"; shift 2 ;;
+      --game)         GAME="${2:-}"; shift 2 ;;
+      --godot)        GODOT_BIN="${2:-}"; shift 2 ;;
+      --port)         PORT="${2:-}"; shift 2 ;;
+      --web)          ENABLE_WEB=1; shift ;;
+      --ws-port)      WS_PORT="${2:-}"; ENABLE_WEB=1; shift 2 ;;
+      --name)         HOSTNAME_VALUE="${2:-}"; shift 2 ;;
+      --maxplayers)   MAXPLAYERS="${2:-}"; shift 2 ;;
+      --tickrate)     TICKRATE="${2:-}"; shift 2 ;;
+      --tags)         TAGS="${2:-}"; shift 2 ;;
+      --config)       CONFIG_DIR="${2:-}"; shift 2 ;;
+      --log)          LOG_DIR="${2:-}"; shift 2 ;;
+      --restart)      RESTART=1; shift ;;
+      --restart-max)  RESTART_MAX="${2:-}"; RESTART=1; shift 2 ;;
+      --dry-run)      DRY_RUN=1; shift ;;
+      --print-config) PRINT_CONFIG=1; shift ;;
+      --install-service)
+        # The name is optional, so a following option must not be eaten as one.
+        if [ $# -ge 2 ] && [ "${2#-}" = "$2" ]; then
+          INSTALL_SERVICE="$2"; shift 2
+        else
+          INSTALL_SERVICE="dotserve"; shift
+        fi
+        ;;
+      --quiet)        QUIET=1; shift ;;
+      --no-banner)    NO_BANNER=1; shift ;;
+      -h|--help)      usage; exit 0 ;;
+      --version)      printf 'dotserve %s\n' "$DOTSERVE_VERSION"; exit 0 ;;
+      --)             shift; PASSTHROUGH=("$@"); break ;;
+      +*)
+        # A console command takes its own arguments: `+exec autoexec.cfg` is one
+        # command, not a command followed by an unknown option. Everything up to the
+        # next option or the next +command belongs to it.
+        PASSTHROUGH+=("$1"); shift
+        while [ $# -gt 0 ] && [ "${1#-}" = "$1" ] && [ "${1#+}" = "$1" ]; do
+          PASSTHROUGH+=("$1"); shift
+        done
+        ;;
+      *)              usage >&2; die "$EXIT_USAGE" "unknown option: $1" ;;
+    esac
+  done
+}
+
+require_number() {
+  local name="$1" value="$2" low="$3" high="$4"
+  case "$value" in
+    ''|*[!0-9]*) die "$EXIT_USAGE" "$name must be a number, got '$value'" ;;
+  esac
+  if [ "$value" -lt "$low" ] || [ "$value" -gt "$high" ]; then
+    die "$EXIT_USAGE" "$name must be between $low and $high, got $value"
+  fi
+}
+
+# --- Finding Godot ----------------------------------------------------------
+
+# In order: an explicit --godot, then $GODOT, then PATH, then the places the
+# official builds and the common package managers put it.
+#
+# Cron gives a bare PATH, so a launcher that only checked PATH would work in a
+# terminal and not from a timer -- which is exactly when nobody is watching.
+find_godot() {
+  if [ -n "$GODOT_BIN" ]; then
+    command -v "$GODOT_BIN" >/dev/null 2>&1 || [ -x "$GODOT_BIN" ] \
+      || die "$EXIT_NO_GODOT" "--godot '$GODOT_BIN' is not executable"
+    printf '%s\n' "$GODOT_BIN"
+    return
+  fi
+
+  if [ -n "${GODOT:-}" ] && { command -v "$GODOT" >/dev/null 2>&1 || [ -x "$GODOT" ]; }; then
+    printf '%s\n' "$GODOT"
+    return
+  fi
+
+  local candidate
+  for candidate in godot godot4 godot-headless godot4-headless; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+      printf '%s\n' "$candidate"
+      return
+    fi
+  done
+
+  local path
+  for path in \
+    "$HOME/.local/bin/godot" \
+    "$HOME/bin/godot" \
+    /usr/local/bin/godot \
+    /usr/bin/godot \
+    /opt/godot/godot \
+    /snap/bin/godot \
+    "/Applications/Godot.app/Contents/MacOS/Godot"
+  do
+    [ -x "$path" ] && { printf '%s\n' "$path"; return; }
+  done
+
+  return 1
+}
+
+# Refuses a build older than the family needs, and sets GODOT_VERSION.
+#
+# Checked rather than assumed because the failure on an old build is a project that
+# does not load, reported as dozens of unrelated parse errors -- which sends whoever
+# hit it looking at the wrong thing for an hour.
+#
+# It sets a global instead of printing the version, because it has to be able to stop
+# the run. Called as `V="$(check_godot_version ...)"` the `die` inside it exits the
+# command substitution's subshell and nothing else, so an old Godot is refused in a
+# message and then used anyway -- which is exactly what it did until the self-test
+# checked that the run actually stopped.
+GODOT_VERSION=""
+
+check_godot_version() {
+  local bin="$1" version major minor
+
+  version="$("$bin" --version 2>/dev/null | head -n1 | tr -d '\r')" || true
+  GODOT_VERSION="$version"
+
+  if [ -z "$version" ]; then
+    warn "could not read a version from '$bin'; continuing anyway"
+    return 0
+  fi
+
+  major="${version%%.*}"
+  minor="${version#*.}"; minor="${minor%%.*}"
+
+  case "$major$minor" in
+    ''|*[!0-9]*) warn "unrecognised Godot version '$version'; continuing"; return 0 ;;
+  esac
+
+  if [ "$major" -lt "$MIN_GODOT_MAJOR" ] \
+    || { [ "$major" -eq "$MIN_GODOT_MAJOR" ] && [ "$minor" -lt "$MIN_GODOT_MINOR" ]; }; then
+    die "$EXIT_NO_GODOT" \
+      "Godot $MIN_GODOT_MAJOR.$MIN_GODOT_MINOR or newer is required, found $version"
+  fi
+
+  return 0
+}
+
+# --- Finding the project ----------------------------------------------------
+
+# Walks up from the starting directory looking for a project.godot, so dotserve run
+# anywhere inside a project finds it.
+find_project() {
+  local dir="${1:-$PWD}"
+
+  dir="$(cd "$dir" 2>/dev/null && pwd)" || return 1
+
+  while [ "$dir" != "/" ]; do
+    if [ -f "$dir/project.godot" ]; then
+      printf '%s\n' "$dir"
+      return 0
+    fi
+    dir="$(dirname "$dir")"
+  done
+
+  [ -f "/project.godot" ] && { printf '%s\n' "/"; return 0; }
+  return 1
+}
+
+# --- Configuration ----------------------------------------------------------
+
+default_config_dir() {
+  printf '%s/dotserve\n' "${XDG_CONFIG_HOME:-$HOME/.config}"
+}
+
+default_log_dir() {
+  printf '%s/dotserve/logs\n' "${XDG_STATE_HOME:-$HOME/.local/state}"
+}
+
+# 32 hex characters from the best source available.
+#
+# /dev/urandom first: it is present everywhere this runs and it is the one source
+# that is not a shell PRNG seeded from the clock. $RANDOM is the last resort and is
+# warned about, because a password derived from the time a server started is a
+# password an attacker can search.
+generate_password() {
+  if command -v openssl >/dev/null 2>&1; then
+    openssl rand -hex 16 && return
+  fi
+
+  if [ -r /dev/urandom ]; then
+    LC_ALL=C tr -dc 'a-f0-9' < /dev/urandom 2>/dev/null | head -c 32 && printf '\n'
+    return
+  fi
+
+  warn "no /dev/urandom and no openssl; the generated RCON password is weak"
+  printf '%08x%08x%08x%08x\n' "$RANDOM$RANDOM" "$RANDOM$RANDOM" \
+    "$RANDOM$RANDOM" "$RANDOM$RANDOM"
+}
+
+# Writes server.cfg the first time and never again.
+#
+# Never overwriting is the whole contract: an operator's edits to this file are the
+# server's configuration, and a launcher that regenerated it on upgrade would throw
+# them away on exactly the run nobody was watching.
+ensure_server_cfg() {
+  local dir="$1" template="$2" password
+  # Declared separately: bash expands every word of a `local` before it assigns any
+  # of them, so referring to $dir on the same line is an unbound variable under
+  # `set -u` -- and the failure is at the first run of a fresh install.
+  local cfg="$dir/server.cfg"
+
+  if [ -f "$cfg" ]; then
+    printf 'existing\n'
+    return
+  fi
+
+  mkdir -p "$dir"
+
+  password="$(generate_password)"
+
+  if [ ! -f "$template" ]; then
+    die "$EXIT_CONFIG" "the server.cfg template is missing at $template"
+  fi
+
+  # A umask that leaves this world-readable would put the RCON password in a file
+  # every user on the machine can read, so the mode is set before anything is
+  # written rather than after.
+  ( umask 077; : > "$cfg" )
+
+  sed \
+    -e "s|@HOSTNAME@|${HOSTNAME_VALUE:-A dot server}|g" \
+    -e "s|@MAXPLAYERS@|$MAXPLAYERS|g" \
+    -e "s|@TICKRATE@|$TICKRATE|g" \
+    -e "s|@TAGS@|$TAGS|g" \
+    -e "s|@RCON_PASSWORD@|$password|g" \
+    "$template" > "$cfg"
+
+  chmod 600 "$cfg"
+
+  printf 'created %s\n' "$password"
+}
+
+# Reads a quoted cvar value out of server.cfg.
+read_cfg_value() {
+  local cfg="$1" key="$2"
+
+  [ -f "$cfg" ] || return 1
+
+  sed -n "s/^[[:space:]]*${key}[[:space:]]\{1,\}\"\(.*\)\"[[:space:]]*$/\1/p" "$cfg" \
+    | tail -n1
+}
+
+# Refuses to start with an RCON password anyone could guess.
+#
+# The empty string is fine and means the RCON listener does not open at all. What is
+# refused is a placeholder that got shipped, copied out of a forum post, or left in a
+# template -- which is how a server ends up administered by a stranger.
+readonly WEAK_RCON_PASSWORDS="changeme password rcon rconpassword admin secret \
+letmein dotserve default 123456 CHANGEME @RCON_PASSWORD@"
+
+check_rcon_password() {
+  local cfg="$1" value
+
+  value="$(read_cfg_value "$cfg" rcon_password || true)"
+
+  if [ -z "$value" ]; then
+    info "RCON is off (rcon_password is empty in server.cfg)"
+    return 0
+  fi
+
+  local weak
+  for weak in $WEAK_RCON_PASSWORDS; do
+    if [ "$value" = "$weak" ]; then
+      die "$EXIT_CONFIG" \
+"rcon_password in $cfg is '$value', which is a known default.
+
+  A server with a guessable RCON password is a server anyone can run console
+  commands on. Set a real one, or set it to \"\" to turn RCON off entirely."
+    fi
+  done
+
+  if [ "${#value}" -lt 8 ]; then
+    die "$EXIT_CONFIG" \
+      "rcon_password in $cfg is $((${#value})) characters. Use at least 8, or \"\" to turn RCON off."
+  fi
+
+  return 0
+}
+
+# --- Addresses --------------------------------------------------------------
+
+# The LAN address, best effort.
+#
+# Printed because "it says it started and my friend cannot connect" is almost always
+# a bind address or a firewall, and the first thing that helps is knowing which
+# address the server is actually reachable on.
+lan_address() {
+  local address=""
+
+  if command -v ip >/dev/null 2>&1; then
+    address="$(ip -4 route get 1.1.1.1 2>/dev/null \
+      | sed -n 's/.*src \([0-9.]*\).*/\1/p' | head -n1)"
+  fi
+
+  if [ -z "$address" ] && command -v ipconfig >/dev/null 2>&1; then
+    address="$(ipconfig getifaddr en0 2>/dev/null || true)"
+  fi
+
+  if [ -z "$address" ] && command -v hostname >/dev/null 2>&1; then
+    address="$(hostname -I 2>/dev/null | awk '{print $1}')"
+  fi
+
+  printf '%s\n' "${address:-}"
+}
+
+port_is_free() {
+  local port="$1"
+
+  if command -v ss >/dev/null 2>&1; then
+    ! ss -ltnu 2>/dev/null | awk '{print $5}' | grep -qE "[:.]${port}$"
+    return
+  fi
+
+  if command -v lsof >/dev/null 2>&1; then
+    ! lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1
+    return
+  fi
+
+  # No tool to check with. Reporting "free" is right: the alternative is refusing to
+  # start on a machine where the check is simply unavailable.
+  return 0
+}
+
+print_banner() {
+  local version="$1" lan
+  lan="$(lan_address)"
+
+  say ""
+  say "${C_BOLD}${HOSTNAME_VALUE:-A dot server}${C_OFF}"
+  say "${C_DIM}dotserve $DOTSERVE_VERSION · Godot ${version:-unknown}${C_OFF}"
+  say ""
+  say "  Players on this machine   ${C_GREEN}localhost:$PORT${C_OFF}"
+
+  if [ -n "$lan" ]; then
+    say "  Players on your network   ${C_GREEN}$lan:$PORT${C_OFF}"
+  else
+    say "  ${C_DIM}Players on your network   (could not determine a LAN address)${C_OFF}"
+  fi
+
+  if [ "$ENABLE_WEB" -eq 1 ]; then
+    say "  Browser clients           ${C_GREEN}ws://${lan:-localhost}:$WS_PORT${C_OFF}"
+  fi
+
+  say ""
+  say "${C_DIM}  Players elsewhere need port $PORT forwarded to this machine.${C_OFF}"
+  say "${C_DIM}  Configuration: $CONFIG_DIR/server.cfg${C_OFF}"
+  say ""
+}
+
+# --- systemd ----------------------------------------------------------------
+
+print_service() {
+  local name="$1" self
+  self="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+
+  cat <<UNIT
+[Unit]
+Description=dotserve — ${HOSTNAME_VALUE:-A dot server}
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=$(id -un)
+WorkingDirectory=$PROJECT_DIR
+ExecStart=$self --project $PROJECT_DIR --port $PORT${GAME:+ --game $GAME}${ENABLE_WEB:+ --web} --config $CONFIG_DIR --log $LOG_DIR --no-banner
+
+# dotserve has its own backoff, and two supervisors backing off against each other
+# produce a restart storm that looks like a crash loop. Let systemd own it.
+Restart=on-failure
+RestartSec=5
+
+# A misconfiguration is not something to retry. These are dotserve's own codes for
+# "no Godot", "no project", "bad config" and "port in use"; retrying any of them
+# just fills the journal.
+RestartPreventExitStatus=$EXIT_NO_GODOT $EXIT_NO_PROJECT $EXIT_CONFIG $EXIT_PORT
+
+# The server needs its config directory, its logs, and nothing else.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=$CONFIG_DIR $LOG_DIR
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+}
+
+# --- Building the command ---------------------------------------------------
+
+build_command() {
+  BUILT=(
+    "$RESOLVED_GODOT"
+    --headless
+    --path "$PROJECT_DIR"
+  )
+
+  # dot-server reads its configuration from argv with a --server- prefix, and refuses
+  # secrets there (DotConfig.sensitive_keys) -- which is why the RCON password is only
+  # ever in server.cfg and never on this command line.
+  BUILT+=(
+    --
+    --server-port "$PORT"
+    --server-maxplayers "$MAXPLAYERS"
+    --server-tickrate "$TICKRATE"
+    --server-config-dir "$CONFIG_DIR"
+  )
+
+  [ -n "$HOSTNAME_VALUE" ] && BUILT+=(--server-hostname "$HOSTNAME_VALUE")
+  [ -n "$TAGS" ] && BUILT+=(--server-tags "$TAGS")
+  [ -n "$GAME" ] && BUILT+=(--server-game "$GAME")
+
+  if [ "$ENABLE_WEB" -eq 1 ]; then
+    BUILT+=(--server-websocket true --server-ws-port "$WS_PORT")
+  fi
+
+  if [ ${#PASSTHROUGH[@]} -gt 0 ]; then
+    BUILT+=("${PASSTHROUGH[@]}")
+  fi
+}
+
+# --- Running ----------------------------------------------------------------
+
+run_once() {
+  "${BUILT[@]}"
+}
+
+run_with_restart() {
+  local attempt=0 delay=1 status=0
+
+  while true; do
+    set +e
+    run_once
+    status=$?
+    set -e
+
+    [ "$status" -eq 0 ] && return 0
+
+    # A misconfiguration is not worth retrying: it will fail identically forever and
+    # the restart loop turns one clear error into a wall of them.
+    case "$status" in
+      "$EXIT_NO_GODOT"|"$EXIT_NO_PROJECT"|"$EXIT_CONFIG"|"$EXIT_PORT"|"$EXIT_USAGE")
+        fail "exited with $status, which is a configuration problem; not restarting"
+        return "$status"
+        ;;
+    esac
+
+    attempt=$((attempt + 1))
+
+    if [ "$RESTART_MAX" -gt 0 ] && [ "$attempt" -gt "$RESTART_MAX" ]; then
+      fail "gave up after $RESTART_MAX restarts"
+      return "$status"
+    fi
+
+    warn "server exited with $status; restarting in ${delay}s (attempt $attempt)"
+    sleep "$delay"
+
+    # Exponential to a cap. Without the cap a server that fails at boot restarts
+    # forever at one second and fills a disk with logs overnight.
+    delay=$((delay * 2))
+    [ "$delay" -gt 60 ] && delay=60
+  done
+}
+
+# --- Main -------------------------------------------------------------------
+
+main() {
+  parse_args "$@"
+
+  require_number "--port" "$PORT" 1 65535
+  require_number "--maxplayers" "$MAXPLAYERS" 1 1024
+  require_number "--tickrate" "$TICKRATE" 1 240
+  [ "$RESTART_MAX" -eq 0 ] || require_number "--restart-max" "$RESTART_MAX" 1 100000
+
+  if [ "$ENABLE_WEB" -eq 1 ] && [ "$WS_PORT" -eq 0 ]; then
+    WS_PORT=$((PORT + 1))
+  fi
+  [ "$WS_PORT" -eq 0 ] || require_number "--ws-port" "$WS_PORT" 1 65535
+
+  if [ "$ENABLE_WEB" -eq 1 ] && [ "$WS_PORT" -eq "$PORT" ]; then
+    die "$EXIT_USAGE" "--ws-port and --port cannot be the same port"
+  fi
+
+  [ -z "$CONFIG_DIR" ] && CONFIG_DIR="$(default_config_dir)"
+  [ -z "$LOG_DIR" ] && LOG_DIR="$(default_log_dir)"
+
+  if [ -z "$PROJECT_DIR" ]; then
+    PROJECT_DIR="$(find_project "$PWD")" || die "$EXIT_NO_PROJECT" \
+"no project.godot here or in any parent directory.
+
+  Run dotserve from inside your Godot project, or pass --project DIR."
+  else
+    [ -f "$PROJECT_DIR/project.godot" ] || die "$EXIT_NO_PROJECT" \
+      "no project.godot in '$PROJECT_DIR'"
+    PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd)"
+  fi
+
+  RESOLVED_GODOT="$(find_godot)" || die "$EXIT_NO_GODOT" \
+"could not find a Godot binary.
+
+  Install Godot $MIN_GODOT_MAJOR.$MIN_GODOT_MINOR or newer, or pass --godot PATH,
+  or set \$GODOT."
+
+  check_godot_version "$RESOLVED_GODOT"
+
+  local template
+  template="$(cd "$(dirname "$0")" && pwd)/templates/server.cfg"
+
+  if [ "$PRINT_CONFIG" -eq 1 ]; then
+    printf 'project      %s\n' "$PROJECT_DIR"
+    printf 'godot        %s (%s)\n' "$RESOLVED_GODOT" "${GODOT_VERSION:-unknown}"
+    printf 'config       %s\n' "$CONFIG_DIR"
+    printf 'logs         %s\n' "$LOG_DIR"
+    printf 'port         %s\n' "$PORT"
+    printf 'websocket    %s\n' \
+      "$([ "$ENABLE_WEB" -eq 1 ] && printf '%s' "$WS_PORT" || printf 'off')"
+    printf 'maxplayers   %s\n' "$MAXPLAYERS"
+    printf 'tickrate     %s\n' "$TICKRATE"
+    printf 'game         %s\n' "${GAME:-<none>}"
+    exit 0
+  fi
+
+  mkdir -p "$LOG_DIR"
+
+  local created
+  created="$(ensure_server_cfg "$CONFIG_DIR" "$template")"
+
+  if [ "${created%% *}" = "created" ]; then
+    say ""
+    say "${C_BOLD}A configuration was created at $CONFIG_DIR/server.cfg${C_OFF}"
+    say ""
+    say "  Its RCON password is ${C_GREEN}${created#created }${C_OFF}"
+    say ""
+    say "${C_DIM}  This is the only time it is printed. It is in server.cfg, which is${C_OFF}"
+    say "${C_DIM}  readable only by you. Do not pass it on a command line or in an${C_OFF}"
+    say "${C_DIM}  environment variable: both are readable by other processes.${C_OFF}"
+  fi
+
+  check_rcon_password "$CONFIG_DIR/server.cfg"
+
+  if [ -n "$INSTALL_SERVICE" ]; then
+    print_service "$INSTALL_SERVICE"
+    exit 0
+  fi
+
+  if ! port_is_free "$PORT"; then
+    die "$EXIT_PORT" "something is already listening on port $PORT"
+  fi
+
+  if [ "$ENABLE_WEB" -eq 1 ] && ! port_is_free "$WS_PORT"; then
+    die "$EXIT_PORT" "something is already listening on WebSocket port $WS_PORT"
+  fi
+
+  build_command
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    printf '%q ' "${BUILT[@]}"
+    printf '\n'
+    exit 0
+  fi
+
+  [ "$NO_BANNER" -eq 1 ] || print_banner "$GODOT_VERSION"
+
+  if [ "$RESTART" -eq 1 ]; then
+    run_with_restart
+  else
+    run_once
+  fi
+}
+
+main "$@"

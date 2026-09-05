@@ -1,0 +1,6 @@
+# Local test output
+tests/tmp/
+
+# OS
+.DS_Store
+Thumbs.db
