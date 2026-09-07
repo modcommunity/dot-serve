@@ -12,14 +12,14 @@ This tool, along with every asset it is built on, was built initially with **Cla
 I intend on reviewing code, testing, and editing documentation regularly. If you're interested in helping out, please let me know!
 
 ## Starting a Server Without Knowing How It Works
-`dotserve` — start a [dot-server](../dot-server) without knowing how dot-server works.
+`dotserve` — start a [dot-server](https://github.com/modcommunity/dot-server) without knowing how dot-server works.
 
 dot-server is deeply configurable: cvars, flags, `server.cfg`, `autoexec.cfg`,
 `+command` arguments, RCON, and layered configuration from file, environment and argv.
 What it did not have was a front door. This is the doorbell.
 
-Part of the [dot-*](../NOTES.md) family, and the only piece that is not a Godot addon.
-Needs `bash` and a Godot 4.4+ binary.
+Part of the [dot-*](https://github.com/modcommunity) family, and the only piece that is not a Godot addon.
+Needs `bash` and a Godot 4.7+ binary.
 
 ## Install
 

@@ -73,7 +73,7 @@ PROJECT
   cat > "$TMP/bin/godot" <<'FAKE'
 #!/usr/bin/env bash
 if [ "${1:-}" = "--version" ]; then
-  echo "4.4.1.stable.official.49a5bc7b6"
+  echo "4.7.2.stable.official.ed1daf0bf"
   exit 0
 fi
 printf '%s\n' "$@" > "${DOTSERVE_TEST_ARGS:-/dev/null}"
@@ -91,6 +91,20 @@ fi
 exit 0
 OLD
   chmod +x "$TMP/bin/godot-old"
+
+  # One release BELOW the floor. 4.6 was acceptable until the family moved to 4.7,
+  # so it is the version that tells a working gate from one that only ever refuses
+  # engines nobody would run anyway -- 4.2 is far enough below that a gate off by
+  # three minors still passes on it.
+  cat > "$TMP/bin/godot-just-old" <<'JUSTOLD'
+#!/usr/bin/env bash
+if [ "${1:-}" = "--version" ]; then
+  echo "4.6.3.stable.official"
+  exit 0
+fi
+exit 0
+JUSTOLD
+  chmod +x "$TMP/bin/godot-just-old"
 
   export PATH="$TMP/bin:$PATH"
 }
@@ -132,14 +146,19 @@ test_godot_discovery() {
   local out
   out="$(GODOT="$TMP/bin/godot" "$DOTSERVE" --project "$TMP/project" \
     --config "$TMP/config" --print-config 2>&1)"
-  check_contains "$out" "4.4.1" "\$GODOT is used when it is set"
+  check_contains "$out" "4.7.2" "\$GODOT is used when it is set"
 
   out="$("$DOTSERVE" --godot "$TMP/bin/godot-old" --project "$TMP/project" \
     --config "$TMP/config" --print-config 2>&1)"
-  check_contains "$out" "4.4 or newer" \
+  check_contains "$out" "4.7 or newer" \
     "an old Godot is refused with a version message"
   check_missing "$out" "project      " \
     "and the run stops rather than continuing"
+
+  out="$("$DOTSERVE" --godot "$TMP/bin/godot-just-old" --project "$TMP/project" \
+    --config "$TMP/config" --print-config 2>&1)"
+  check_contains "$out" "4.7 or newer" \
+    "and so is the release immediately below the floor"
 
   out="$("$DOTSERVE" --godot "$TMP/bin/nonexistent" --project "$TMP/project" \
     --print-config 2>&1)"

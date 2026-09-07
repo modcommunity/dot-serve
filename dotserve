@@ -22,11 +22,13 @@ set -euo pipefail
 
 readonly DOTSERVE_VERSION="0.1.0"
 
-# The oldest engine the dot-* family runs on. Below this, class_name resolution and
-# the .uid handling differ enough that a project silently fails to load rather than
+# The oldest engine the dot-* family runs on. Every dot-* project.godot declares
+# `config/features=PackedStringArray("4.7")`, so an older editor treats them as
+# saved-by-a-newer-version; the family is built and its suites are run on 4.7.x.
+# The gate is here because below it a project silently fails to load rather than
 # reporting a version problem.
 readonly MIN_GODOT_MAJOR=4
-readonly MIN_GODOT_MINOR=4
+readonly MIN_GODOT_MINOR=7
 
 # Exit codes, so a supervisor can tell a misconfiguration from a crash.
 readonly EXIT_USAGE=2
