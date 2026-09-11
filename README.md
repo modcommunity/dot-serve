@@ -12,7 +12,7 @@ This tool, along with every asset it is built on, was built initially with **Cla
 I intend on reviewing code, testing, and editing documentation regularly. If you're interested in helping out, please let me know!
 
 ## Starting a Server Without Knowing How It Works
-`dotserve` — start a [dot-server](https://github.com/modcommunity/dot-server) without knowing how dot-server works.
+`dotserve` starts a [dot-server](https://github.com/modcommunity/dot-server) for you, without you needing to know how dot-server works.
 
 dot-server is deeply configurable: cvars, flags, `server.cfg`, `autoexec.cfg`, `+command` arguments, RCON, and layered configuration from file, environment and argv. What it did not have was a front door. This is the doorbell.
 
@@ -39,11 +39,11 @@ The first run writes a commented `server.cfg` under `~/.config/dotserve`, genera
 
 ## What it does that is easy to leave out
 
-**It prints the address a friend can paste**, including a LAN address — because "it says it started and my friend cannot connect" is almost always a bind address or a firewall, and the first thing that helps is knowing which address the server is actually on.
+**It prints the address a friend can paste**, including a LAN address, because "it says it started and my friend cannot connect" is almost always a bind address or a firewall, and the first thing that helps is knowing which address the server is actually on.
 
 **It refuses to start with a guessable RCON password.** An empty one is fine and means the RCON listener does not open at all. What is refused is a placeholder that got shipped, copied out of a forum post, or left in a template.
 
-**The RCON password is never on a command line.** `server.cfg` is written mode 600 before anything goes into it. argv and the environment are readable by every other process on the machine and both end up in pasted bug reports — the same reason `DotConfig.sensitive_keys` refuses secrets from them.
+**The RCON password is never on a command line.** `server.cfg` is written mode 600 before anything goes into it. argv and the environment are readable by every other process on the machine and both end up in pasted bug reports. That is the same reason `DotConfig.sensitive_keys` refuses secrets from them.
 
 **It never overwrites your `server.cfg`.** Your edits *are* the server's configuration.
 
@@ -67,4 +67,4 @@ Exit codes are meaningful, so a supervisor can tell a misconfiguration from a cr
 tests/selftest.sh
 ```
 
-54 checks. Nothing starts a real server — the launcher's whole job is what happens *before* one does, and `--dry-run` and `--print-config` exist so that is checkable. A fake `godot` on `PATH` stands in for the engine, so the suite runs on a machine that has none.
+54 checks. Nothing starts a real server, because the launcher's whole job is what happens *before* one does, and `--dry-run` and `--print-config` exist so that is checkable. A fake `godot` on `PATH` stands in for the engine, so the suite runs on a machine that has none.
