@@ -68,3 +68,7 @@ tests/selftest.sh
 ```
 
 54 checks. Nothing starts a real server, because the launcher's whole job is what happens *before* one does, and `--dry-run` and `--print-config` exist so that is checkable. A fake `godot` on `PATH` stands in for the engine, so the suite runs on a machine that has none.
+
+## Licence
+
+MIT. See [LICENSE](LICENSE).
