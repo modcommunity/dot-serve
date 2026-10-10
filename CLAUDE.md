@@ -1,97 +1,46 @@
 # dot-serve
 
-The `dotserve` launcher. Read `../../CLAUDE.md` for the family-wide context; this is
-the only project in it that is not a Godot addon, so most of those rules do not apply.
+The `dotserve` launcher: a bash script that finds a Godot binary and a project, writes a commented `server.cfg` once, refuses a guessable RCON password, prints the join addresses, and execs a headless dot-server. It is not a Godot project; most family rules about GDScript do not apply. A launcher, not a framework: server behaviour belongs in dot-server.
 
-## What this is, and what it is not
+Read the family [CLAUDE.md](../../CLAUDE.md) for context.
 
-PLATFORM.md item 9. **A launcher, not a framework.** It finds the Godot runtime, picks
-a config directory, writes a commented `server.cfg` the first time, checks a couple of
-things that are dangerous to get wrong, prints a join address, and execs the engine.
+## Read before
 
-Everything else stays in dot-server, where it belongs. If a change here starts looking
-like server behaviour rather than server *starting*, it is in the wrong repository.
+| Read | Before |
+| --- | --- |
+| [docs/design.md](docs/design.md) | changing anything: the four things it gets right, testing without an engine, the systemd unit, what is deliberately not here |
+| [docs/history.md](docs/history.md) | editing the script: the two bash traps the self-test caught |
 
-## The four things it exists to get right
+## Layout
 
-1. **Print the join address for every transport, including a LAN one.** "It says it
-   started and my friend cannot connect" is almost always a bind address or a firewall.
-2. **Refuse a default RCON password.** A generated one printed once beats a documented
-   default nobody changes. Empty is *not* refused — it means the RCON listener does not
-   open at all, which is right for a server nobody administers remotely.
-3. **Never put the RCON password on a command line.** argv is readable by every other
-   process on the machine and ends up in pasted bug reports — the same reason
-   `DotConfig.sensitive_keys` refuses secrets from argv and the environment. It lives
-   in `server.cfg`, which is created mode 600 *before* anything is written into it.
-4. **Never overwrite `server.cfg`.** An operator's edits are the configuration.
-   Regenerating on upgrade throws them away on the one run nobody is watching.
+| Path | What |
+| --- | --- |
+| `dotserve` | the launcher (`find_godot`, `check_godot_version`, `ensure_server_cfg`, `check_rcon_password`, `build_command`, `print_service`, `run_with_restart`) |
+| `templates/server.cfg` | the commented first-run config; `@RCON_PASSWORD@` is replaced with a generated one |
+| `install.sh` | symlinks `dotserve` into `~/.local/bin` (or `$PREFIX`) |
+| `tests/selftest.sh` | the suite, with a fake `godot` on `PATH` |
 
-## Bash traps this hit, both found by the self-test
-
-**`local a="$1" b="$a/x"` is an unbound variable under `set -u`.** Bash expands every
-word of a `local` command before it assigns any of them, so `$a` is not yet set when
-`"$a/x"` is expanded. It failed in `ensure_server_cfg`, which is the *first run of a
-fresh install* — the single most important path in the whole script.
-
-**`V="$(check_version)"` cannot fail the script.** `die` inside a command substitution
-exits the subshell and nothing else, and the `|| true` swallowed the status on top of
-that. The Godot version gate printed its refusal and then used the old binary anyway.
-It now sets a global and is called directly. The self-test asserts not just that the
-message appears but that *the run stops*, which is what caught it.
-
-## Testing a launcher without launching anything
-
-`--dry-run` prints the exact command it would run and exits. `--print-config` prints
-the resolved configuration and exits. Both exist so the interesting part is checkable,
-and a fake `godot` on `PATH` covers the rest — the suite runs on a machine with no
-engine installed at all.
-
-That means the one thing **not** covered is whether dot-server actually accepts the
-argv `build_command` produces. Those flags follow `DotServerConfig`'s
-`--server-` CLI prefix and are checked against it by reading, not by running.
-
-## systemd: one supervisor, not two
-
-The generated unit sets `Restart=on-failure` and deliberately does **not** pass
-`--restart`. dotserve has its own exponential backoff, and two supervisors backing off
-against each other produce a restart storm that reads as a crash loop.
-
-`RestartPreventExitStatus` lists the misconfiguration codes. A server that cannot find
-its project will not find it on the ninetieth attempt either, and retrying turns one
-clear error into a journal full of them.
-
-`ProtectSystem=strict` with `ReadWritePaths` limited to the config and log directories:
-a game server is exactly the kind of process that should not be able to write anywhere
-else.
-
-## Validating changes
+## Running and testing
 
 ```bash
-cd godot/dot-serve
 bash -n dotserve && bash -n tests/selftest.sh
 tests/selftest.sh
 ```
 
-54 checks. Exits non-zero on any failure.
+Exits non-zero on any failure. Run it after any change: two of its checks exist because the obvious bash was wrong in a way that only shows on a fresh install or with an old engine. `--dry-run` and `--print-config` show what a run would do without starting anything.
 
-**Run it after any change.** Two of the checks exist because the obvious bash was
-wrong in a way that only shows on a fresh install or with an old engine — neither of
-which anyone reproduces by hand.
+## Rules that bite
 
-## Things deliberately not here
+- Print a join address for every transport, LAN included. [design](docs/design.md#the-four-things-it-exists-to-get-right)
+- Refuse a known-default or short RCON password; empty means RCON off and is allowed. [design](docs/design.md#the-four-things-it-exists-to-get-right)
+- The RCON password never goes on a command line; `server.cfg` is created mode 600 before anything is written. [design](docs/design.md#the-four-things-it-exists-to-get-right)
+- Never overwrite an existing `server.cfg`. [design](docs/design.md#the-four-things-it-exists-to-get-right)
+- The systemd unit never passes `--restart`; one supervisor, not two. [design](docs/design.md#systemd-one-supervisor-not-two)
+- `read_cfg_value` reads one key; do not grow a config parser. [design](docs/design.md#things-deliberately-not-here)
+- Under `set -u`, never refer to a `local` declared on the same line. [history](docs/history.md#one-local-line-cannot-use-its-own-earlier-assignment-under-set--u)
+- A check that must stop the run is called directly, never inside `$(...)`. [history](docs/history.md#a-check-inside-a-command-substitution-cannot-stop-the-script)
 
-- **Downloading Godot.** It finds one; it does not fetch one. A launcher that
-  downloads a binary is a launcher that has to verify a signature, and that is a
-  different program with different risks.
-- **A Windows version.** `dotserve.ps1` or a `.cmd` shim is a real gap. The bash script
-  runs under Git Bash and WSL today, which is not the same as supporting Windows.
-- **Reading `server.cfg` for anything but `rcon_password`.** `read_cfg_value` is
-  deliberately a one-key `sed` and not a config parser. dot-server's console is the
-  parser, and a second one here would drift from it.
-- **Server listing registration.** Announcing a server to the backbone is dot-auth's
-  `DotBackboneClient` and a running server's job, not a launcher's.
-- **Multi-instance management.** One invocation, one server. Running four is four
-  systemd units with four `--config` directories, which is what `--install-service NAME`
-  is for.
-- **Log rotation.** `--log` names a directory and the server writes into it. Rotation is
-  `logrotate`'s job and doing it badly here would fight it.
+## Open items
+
+- `build_command` passes dot-server settings as `--server-port`, `--server-maxplayers`, `--server-tickrate`, `--server-config-dir`, `--server-hostname`, `--server-tags`, `--server-game`, `--server-websocket`, `--server-ws-port`. `DotServerConfig.cli_prefix()` is `--sv-`, and its keys are `max_players`, `transport_mode` and so on, so these flags do not reach dot-server (an argument without the prefix is not even reported as unknown). The suite cannot see it because it runs a fake engine. Not fixed yet.
+- No Windows launcher (`dotserve.ps1` or a `.cmd` shim). The script runs under Git Bash and WSL, which is not the same as supporting Windows.
