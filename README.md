@@ -57,7 +57,7 @@ Run `dotserve --help`. The ones worth knowing:
 | `--print-config` | Print the resolved configuration, and exit. |
 | `--install-service [NAME]` | Print a systemd unit for this invocation. |
 | `--restart` | Restart on a crash, with exponential backoff to a 60-second cap. |
-| `--web` / `--ws-port N` | Also listen for browser clients. Defaults to `--port` + 1. |
+| `--web` | Also serve browser clients, over WebSocket on the game port. (`--ws-port` is accepted and ignored.) |
 
 Exit codes are meaningful, so a supervisor can tell a misconfiguration from a crash: `2` usage, `3` no Godot, `4` no project, `5` bad config, `6` port in use. The generated systemd unit lists all of them under `RestartPreventExitStatus`.
 

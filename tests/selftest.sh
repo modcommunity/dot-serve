@@ -271,13 +271,15 @@ test_argument_validation() {
   check "$([ "$status" -ne 0 ] && echo 1 || echo 0)" \
     "an unknown option is refused rather than ignored" "exit $status"
 
-  # The same port twice would bind one listener and silently not the other, which
-  # reads as "browser clients cannot connect" with nothing in the log.
+  # Browsers share the game port now (the dual transport), so an old --ws-port is
+  # accepted, ignored and said to be, rather than refusing to start a unit file.
   status=0
-  out="$(run_dotserve --config "$TMP/config" --port 27015 --ws-port 27015 \
+  out="$(run_dotserve --config "$TMP/config" --port 27015 --ws-port 27016 \
     --dry-run 2>&1)" || status=$?
-  check "$([ "$status" -ne 0 ] && echo 1 || echo 0)" \
-    "the same port for UDP and WebSocket is refused" "exit $status"
+  check "$([ "$status" -eq 0 ] && echo 1 || echo 0)" \
+    "an old --ws-port still starts" "exit $status"
+  check "$(echo "$out" | grep -q -- "--ws-port is ignored" && echo 1 || echo 0)" \
+    "and says it is ignored" "$out"
 }
 
 test_command_building() {
@@ -294,10 +296,17 @@ test_command_building() {
 
   check_contains "$out" "--headless" "the server runs headless"
   check_contains "$out" "$TMP/project" "in the right project"
-  check_contains "$out" "27044" "on the right port"
-  check_contains "$out" "24" "with the right player count"
-  check_contains "$out" "128" "and the right tick rate"
-  check_contains "$out" "res://games/arena" "loading the right game"
+  # Flag AND value, spelled the way DotServerConfig reads them. These checks used to
+  # look for "27044" anywhere in the line, which a --server-port passed for as long as it
+  # existed while dot-server ignored every one of them: its prefix is --sv-, and
+  # DotConfig.apply_cli skips an argument without it in silence.
+  check_contains "$out" "--sv-port 27044" "on the right port, as dot-server reads it"
+  check_contains "$out" "--sv-max-players 24" "with the right player count"
+  check_contains "$out" "--sv-tickrate 128" "and the right tick rate"
+  check_contains "$out" "--sv-hostname Test\\ Server" "and the right name (printed shell-quoted)"
+  check_contains "$out" "--sv-startup-config $TMP/config/server.cfg" "running the operator's server.cfg"
+  check_contains "$out" "+changegame res://games/arena" "loading the right game"
+  check_missing "$out" "--server-" "and no flag dot-server would skip in silence"
 
   # The RCON password must never reach a command line: argv is readable by every
   # other process on the machine, and it ends up in pasted bug reports. dot-server's
@@ -310,9 +319,10 @@ test_command_building() {
   fi
 
   out="$(run_dotserve --config "$TMP/config" --web --port 27015 --dry-run)"
-  check_contains "$out" "27016" \
-    "--web defaults the WebSocket port to one above the UDP one"
-  check_contains "$out" "websocket" "and turns the WebSocket listener on"
+  check_contains "$out" "--sv-transport-mode dual" \
+    "--web serves browsers on the game port beside native clients"
+  out="$(run_dotserve --config "$TMP/config" --port 27015 --dry-run)"
+  check_contains "$out" "--sv-transport-mode enet" "and without it the server is native only"
 
   out="$(run_dotserve --config "$TMP/config" --dry-run -- +sv_cheats 1 +map dm_arena)"
   check_contains "$out" "+sv_cheats" "commands after -- are passed through"

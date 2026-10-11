@@ -40,7 +40,10 @@ Exits non-zero on any failure. Run it after any change: two of its checks exist 
 - Under `set -u`, never refer to a `local` declared on the same line. [history](docs/history.md#one-local-line-cannot-use-its-own-earlier-assignment-under-set--u)
 - A check that must stop the run is called directly, never inside `$(...)`. [history](docs/history.md#a-check-inside-a-command-substitution-cannot-stop-the-script)
 
+## Flags reach dot-server
+
+- **Server settings are passed as `--sv-<key>`, spelled as `DotServerConfig`'s `@export`** (`--sv-max-players`, `--sv-transport-mode`), and the game as `+changegame`. dot-core's `apply_cli` skips any other prefix in silence; `tests/selftest.sh` checks flag and value together for that reason. [history](docs/history.md)
+
 ## Open items
 
-- `build_command` passes dot-server settings as `--server-port`, `--server-maxplayers`, `--server-tickrate`, `--server-config-dir`, `--server-hostname`, `--server-tags`, `--server-game`, `--server-websocket`, `--server-ws-port`. `DotServerConfig.cli_prefix()` is `--sv-`, and its keys are `max_players`, `transport_mode` and so on, so these flags do not reach dot-server (an argument without the prefix is not even reported as unknown). The suite cannot see it because it runs a fake engine. Not fixed yet.
 - No Windows launcher (`dotserve.ps1` or a `.cmd` shim). The script runs under Git Bash and WSL, which is not the same as supporting Windows.

@@ -98,7 +98,7 @@ Where the game is
 Listening
   --port N              UDP/ENet port for native clients. Default 27015.
   --web                 Also listen on WebSocket, for browser clients.
-  --ws-port N           WebSocket port. Default: --port plus one.
+  --ws-port N           Ignored: browsers use the game port. Kept for old unit files.
 
 Identity
   --name TEXT           Server name shown in listings.
@@ -533,24 +533,41 @@ build_command() {
     --path "$PROJECT_DIR"
   )
 
-  # dot-server reads its configuration from argv with a --server- prefix, and refuses
-  # secrets there (DotConfig.sensitive_keys) -- which is why the RCON password is only
-  # ever in server.cfg and never on this command line.
+  # dot-server reads its configuration from argv with a --sv- prefix
+  # (DotServerConfig.cli_prefix) and refuses secrets there (DotConfig.sensitive_keys),
+  # which is why the RCON password is only ever in server.cfg and never on this line.
+  #
+  # [b]--sv-, and the key names are DotServerConfig's own.[/b] This passed --server-port
+  # and friends for as long as it existed. dot-core's apply_cli skips any argument
+  # without the prefix in silence, so every server setting dotserve offered did nothing
+  # and the server ran on its defaults; the self-test could not see it because it runs a
+  # fake engine. Spell a new flag the way DotServerConfig's @export is spelled.
   BUILT+=(
     --
-    --server-port "$PORT"
-    --server-maxplayers "$MAXPLAYERS"
-    --server-tickrate "$TICKRATE"
-    --server-config-dir "$CONFIG_DIR"
+    --sv-port "$PORT"
+    --sv-max-players "$MAXPLAYERS"
+    --sv-tickrate "$TICKRATE"
+    # An absolute path: dot-server's console accepts one, and the file is the one
+    # ensure_server_cfg created in the operator's config directory.
+    --sv-startup-config "$CONFIG_DIR/server.cfg"
   )
 
-  [ -n "$HOSTNAME_VALUE" ] && BUILT+=(--server-hostname "$HOSTNAME_VALUE")
-  [ -n "$TAGS" ] && BUILT+=(--server-tags "$TAGS")
-  [ -n "$GAME" ] && BUILT+=(--server-game "$GAME")
+  [ -n "$HOSTNAME_VALUE" ] && BUILT+=(--sv-hostname "$HOSTNAME_VALUE")
+  [ -n "$TAGS" ] && BUILT+=(--sv-tags "$TAGS")
 
+  # Browsers reach a dot-server over WebSocket on the game port itself (the "dual"
+  # transport: TCP for browsers, UDP for native clients). Without --web this is a
+  # native-only server. There is no separate WebSocket port any more; --ws-port is
+  # accepted and ignored, with a note, so old unit files keep starting.
   if [ "$ENABLE_WEB" -eq 1 ]; then
-    BUILT+=(--server-websocket true --server-ws-port "$WS_PORT")
+    BUILT+=(--sv-transport-mode dual)
+  else
+    BUILT+=(--sv-transport-mode enet)
   fi
+
+  # The game is a console command, not a setting: `+changegame` runs once the server is
+  # up, exactly as an operator would type it.
+  [ -n "$GAME" ] && BUILT+=(+changegame "$GAME")
 
   if [ ${#PASSTHROUGH[@]} -gt 0 ]; then
     BUILT+=("${PASSTHROUGH[@]}")
@@ -610,14 +627,12 @@ main() {
   require_number "--tickrate" "$TICKRATE" 1 240
   [ "$RESTART_MAX" -eq 0 ] || require_number "--restart-max" "$RESTART_MAX" 1 100000
 
-  if [ "$ENABLE_WEB" -eq 1 ] && [ "$WS_PORT" -eq 0 ]; then
-    WS_PORT=$((PORT + 1))
+  # Browsers share the game port (TCP beside the native clients' UDP). A --ws-port from
+  # an older unit file is accepted so it still starts, and said to be ignored.
+  if [ "$WS_PORT" -ne 0 ] && [ "$WS_PORT" -ne "$PORT" ]; then
+    warn "--ws-port is ignored: browser clients connect to the game port ($PORT) over WebSocket"
   fi
-  [ "$WS_PORT" -eq 0 ] || require_number "--ws-port" "$WS_PORT" 1 65535
-
-  if [ "$ENABLE_WEB" -eq 1 ] && [ "$WS_PORT" -eq "$PORT" ]; then
-    die "$EXIT_USAGE" "--ws-port and --port cannot be the same port"
-  fi
+  [ "$ENABLE_WEB" -eq 1 ] && WS_PORT="$PORT"
 
   [ -z "$CONFIG_DIR" ] && CONFIG_DIR="$(default_config_dir)"
   [ -z "$LOG_DIR" ] && LOG_DIR="$(default_log_dir)"
@@ -685,9 +700,6 @@ main() {
     die "$EXIT_PORT" "something is already listening on port $PORT"
   fi
 
-  if [ "$ENABLE_WEB" -eq 1 ] && ! port_is_free "$WS_PORT"; then
-    die "$EXIT_PORT" "something is already listening on WebSocket port $WS_PORT"
-  fi
 
   build_command
 
