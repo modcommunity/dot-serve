@@ -16,7 +16,7 @@ I intend on reviewing code, testing, and editing documentation regularly. If you
 
 dot-server is deeply configurable: cvars, flags, `server.cfg`, `autoexec.cfg`, `+command` arguments, RCON, and layered configuration from file, environment and argv. What it did not have was a front door. This is the doorbell.
 
-Part of the [dot-*](https://github.com/modcommunity) family, and the only piece that is not a Godot addon. Needs `bash` and a Godot 4.7+ binary.
+Part of the [dot-*](https://github.com/modcommunity) family, and, like dot-ci and dot-bootstrap, not a Godot addon. Needs `bash` and a Godot 4.7+ binary.
 
 ## Install
 
