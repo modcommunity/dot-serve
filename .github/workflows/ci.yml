@@ -21,6 +21,8 @@ jobs:
     validate:
         uses: modcommunity/dot-ci/.github/workflows/validate.yml@v1
         with:
+            efficiency: true
+            hygiene: true
             godot: false
             shell-command: 'tests/selftest.sh'
         secrets:
