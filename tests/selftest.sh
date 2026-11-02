@@ -113,8 +113,12 @@ teardown() {
   rm -rf "$TMP"
 }
 
+# A later --port wins, so tests that pass their own still do. The default 27015 is
+# often taken by a running game server on the same box, which made the suite flaky.
+FREE_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("",0)); print(s.getsockname()[1])')"
+
 run_dotserve() {
-  "$DOTSERVE" --godot "$TMP/bin/godot" --project "$TMP/project" "$@" 2>&1
+  "$DOTSERVE" --godot "$TMP/bin/godot" --project "$TMP/project" --port "${DOTSERVE_TEST_PORT:-$FREE_PORT}" "$@" 2>&1
 }
 
 # --- Discovery --------------------------------------------------------------
@@ -274,7 +278,7 @@ test_argument_validation() {
   # Browsers share the game port now (the dual transport), so an old --ws-port is
   # accepted, ignored and said to be, rather than refusing to start a unit file.
   status=0
-  out="$(run_dotserve --config "$TMP/config" --port 27015 --ws-port 27016 \
+  out="$(run_dotserve --config "$TMP/config" --port "$FREE_PORT" --ws-port 27016 \
     --dry-run 2>&1)" || status=$?
   check "$([ "$status" -eq 0 ] && echo 1 || echo 0)" \
     "an old --ws-port still starts" "exit $status"
@@ -318,10 +322,10 @@ test_command_building() {
       "and the RCON password is not on the command line"
   fi
 
-  out="$(run_dotserve --config "$TMP/config" --web --port 27015 --dry-run)"
+  out="$(run_dotserve --config "$TMP/config" --web --port "$FREE_PORT" --dry-run)"
   check_contains "$out" "--sv-transport-mode dual" \
     "--web serves browsers on the game port beside native clients"
-  out="$(run_dotserve --config "$TMP/config" --port 27015 --dry-run)"
+  out="$(run_dotserve --config "$TMP/config" --port "$FREE_PORT" --dry-run)"
   check_contains "$out" "--sv-transport-mode enet" "and without it the server is native only"
 
   out="$(run_dotserve --config "$TMP/config" --dry-run -- +sv_cheats 1 +map dm_arena)"
