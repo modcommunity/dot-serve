@@ -67,7 +67,7 @@ Exit codes are meaningful, so a supervisor can tell a misconfiguration from a cr
 tests/selftest.sh
 ```
 
-54 checks. Nothing starts a real server, because the launcher's whole job is what happens *before* one does, and `--dry-run` and `--print-config` exist so that is checkable. A fake `godot` on `PATH` stands in for the engine, so the suite runs on a machine that has none.
+`tests/selftest.sh` is the suite. Nothing starts a real server, because the launcher's whole job is what happens *before* one does, and `--dry-run` and `--print-config` exist so that is checkable. A fake `godot` on `PATH` stands in for the engine, so the suite runs on a machine that has none.
 
 ## Licence
 
