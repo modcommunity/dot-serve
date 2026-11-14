@@ -296,7 +296,7 @@ test_command_building() {
 
   local out
   out="$(run_dotserve --config "$TMP/config" --port 27044 --maxplayers 24 \
-    --tickrate 128 --name "Test Server" --game "res://games/arena" --dry-run)"
+    --tickrate 128 --name "Test Server" --game "res://games/fatalcontact" --dry-run)"
 
   check_contains "$out" "--headless" "the server runs headless"
   check_contains "$out" "$TMP/project" "in the right project"
@@ -309,7 +309,7 @@ test_command_building() {
   check_contains "$out" "--sv-tickrate 128" "and the right tick rate"
   check_contains "$out" "--sv-hostname Test\\ Server" "and the right name (printed shell-quoted)"
   check_contains "$out" "--sv-startup-config $TMP/config/server.cfg" "running the operator's server.cfg"
-  check_contains "$out" "+changegame res://games/arena" "loading the right game"
+  check_contains "$out" "+changegame res://games/fatalcontact" "loading the right game"
   check_missing "$out" "--server-" "and no flag dot-server would skip in silence"
 
   # The RCON password must never reach a command line: argv is readable by every
@@ -328,7 +328,7 @@ test_command_building() {
   out="$(run_dotserve --config "$TMP/config" --port "$FREE_PORT" --dry-run)"
   check_contains "$out" "--sv-transport-mode enet" "and without it the server is native only"
 
-  out="$(run_dotserve --config "$TMP/config" --dry-run -- +sv_cheats 1 +map dm_arena)"
+  out="$(run_dotserve --config "$TMP/config" --dry-run -- +sv_cheats 1 +map dm_atrium)"
   check_contains "$out" "+sv_cheats" "commands after -- are passed through"
   check_contains "$out" "+map" "all of them"
 

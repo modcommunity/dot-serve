@@ -12,7 +12,7 @@
 #
 # Usage:
 #   dotserve                            sensible defaults, prints a join URL
-#   dotserve --game res://games/arena   a specific game
+#   dotserve --game res://games/fatalcontact   a specific game
 #   dotserve --port 27015 --web         also listen for browser clients
 #   dotserve --dry-run                  print the command and exit
 #
@@ -91,7 +91,7 @@ dotserve — start a dot-server
 Where the game is
   --project DIR         Godot project to run. Default: the current directory, or
                         the first ancestor containing a project.godot.
-  --game PATH           Game to load at boot, e.g. res://games/arena.
+  --game PATH           Game to load at boot, e.g. res://games/fatalcontact.
   --godot PATH          Godot binary. Default: $GODOT, then PATH, then the usual
                         install locations.
 
@@ -126,7 +126,7 @@ Running
 Anything after -- is passed to the server as-is, which is how a console command is
 run at boot:
 
-  dotserve -- +sv_cheats 1 +map dm_arena
+  dotserve -- +sv_cheats 1 +map dm_atrium
 USAGE
 }
 
