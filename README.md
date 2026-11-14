@@ -1,5 +1,3 @@
-# dot-serve
-
 `dotserve` starts a [dot-server](https://github.com/modcommunity/dot-server) for you without you needing to know how dot-server works. It is a shell script, not a Godot addon. It needs `bash` and a Godot 4.7+ binary.
 
 dot-server is very configurable (cvars, flags, `server.cfg`, `autoexec.cfg`, `+command` arguments, RCON, layered config from file, environment and command line). `dotserve` is the easy way in.
