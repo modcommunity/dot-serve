@@ -1,74 +1,65 @@
-This is the **launcher** for TMC's **Dot** dedicated server. The server is deeply configurable and had no front door, so this is the doorbell.
+# dot-serve
 
-The **Dot** collection is a set of open source Godot 4 assets that provide modular building blocks for games and applications in the TMC ecosystem, covering core functionality, networking, authentication, cloud integration, and more. This is the shell script that starts one of them, so it is not a Godot project itself and needs nothing installed to run.
+`dotserve` starts a [dot-server](https://github.com/modcommunity/dot-server) for you without you needing to know how dot-server works. It is a shell script, not a Godot addon. It needs `bash` and a Godot 4.7+ binary.
 
-**This tool and the assets under it are COMPLETELY OPEN SOURCE**. You are free to use, modify, and distribute them under the terms of the MIT license. The only thing not open source is the back-end web infrastructure. So if you opt into using your own authentication backend instead of integrating with TMC, you will need to build and integrate your own back-end infrastructure.
-
-## From Maintainer & WARNING
-This tool, along with every asset it is built on, was built initially with **Claude Code** and will continue to be maintained and extended using it. This is because I (`gamemann`) cannot build the entire TMC platform alone (I wish I could lol).
-
-**Please treat this as partially tested.** It has its own headless test suite and that suite passes, but very little of this has been in front of real players yet. Expect rough edges, and please report anything you run into.
-
-I intend on reviewing code, testing, and editing documentation regularly. If you're interested in helping out, please let me know!
-
-## Starting a Server Without Knowing How It Works
-`dotserve` starts a [dot-server](https://github.com/modcommunity/dot-server) for you, without you needing to know how dot-server works.
-
-dot-server is deeply configurable: cvars, flags, `server.cfg`, `autoexec.cfg`, `+command` arguments, RCON, and layered configuration from file, environment and argv. What it did not have was a front door. This is the doorbell.
-
-Part of the [dot-*](https://github.com/modcommunity) family, and, like dot-ci and dot-bootstrap, not a Godot addon. Needs `bash` and a Godot 4.7+ binary.
+dot-server is very configurable (cvars, flags, `server.cfg`, `autoexec.cfg`, `+command` arguments, RCON, layered config from file, environment and command line). `dotserve` is the easy way in.
 
 ## Install
 
 ```bash
-./install.sh                 # symlinks into ~/.local/bin
+./install.sh                         # symlinks into ~/.local/bin
 PREFIX=/usr/local/bin sudo ./install.sh
 ```
 
 ## Use
 
 ```bash
-dotserve                            # sensible defaults, prints a join address
-dotserve --game res://games/arena   # a specific game
-dotserve --port 27015 --web         # also listen for browser clients
-dotserve --restart                  # come back up after a crash
-dotserve -- +sv_cheats 1 +map dm_arena
+dotserve                             # sensible defaults, prints a join address
+dotserve --game res://games/fc       # a specific game
+dotserve --port 27015 --web          # also listen for browser clients
+dotserve --restart                   # come back up after a crash
+dotserve -- +sv_cheats 1 +map dm_box # pass cvars and commands to the server
 ```
 
-The first run writes a commented `server.cfg` under `~/.config/dotserve`, generates an RCON password, and prints it once. Every run after that reads the file and never touches it.
+The first run writes a commented `server.cfg` under `~/.config/dotserve`, generates an RCON password and prints it once. Later runs read the file and never touch it.
 
-## What it does that is easy to leave out
+## What it does for you
 
-**It prints the address a friend can paste**, including a LAN address, because "it says it started and my friend cannot connect" is almost always a bind address or a firewall, and the first thing that helps is knowing which address the server is actually on.
-
-**It refuses to start with a guessable RCON password.** An empty one is fine and means the RCON listener does not open at all. What is refused is a placeholder that got shipped, copied out of a forum post, or left in a template.
-
-**The RCON password is never on a command line.** `server.cfg` is written mode 600 before anything goes into it. argv and the environment are readable by every other process on the machine and both end up in pasted bug reports. That is the same reason `DotConfig.sensitive_keys` refuses secrets from them.
-
-**It never overwrites your `server.cfg`.** Your edits *are* the server's configuration.
+| Behaviour | Why |
+| --- | --- |
+| Prints the address a friend can paste, including a LAN address | "It started but my friend cannot connect" is nearly always a bind address or firewall, and knowing which address the server is on is the first step. |
+| Refuses a guessable RCON password | An empty one is fine and means RCON does not listen at all. A placeholder copied from a template or forum post is refused. |
+| Never puts the RCON password on a command line | `server.cfg` is written mode 600 first. Command lines and the environment are readable by other processes and end up in bug reports. |
+| Never overwrites `server.cfg` | Your edits are the server's configuration. |
 
 ## Options
 
-Run `dotserve --help`. The ones worth knowing:
+Run `dotserve --help` for all of them. The ones worth knowing:
 
-| | |
+| Option | Does |
 | --- | --- |
 | `--dry-run` | Print the command it would run, and exit. |
 | `--print-config` | Print the resolved configuration, and exit. |
 | `--install-service [NAME]` | Print a systemd unit for this invocation. |
-| `--restart` | Restart on a crash, with exponential backoff to a 60-second cap. |
-| `--web` | Also serve browser clients, over WebSocket on the game port. (`--ws-port` is accepted and ignored.) |
+| `--restart` | Restart after a crash, with a growing delay that tops out at 60 seconds. |
+| `--web` | Also serve browser clients, over WebSocket on the game port. |
 
-Exit codes are meaningful, so a supervisor can tell a misconfiguration from a crash: `2` usage, `3` no Godot, `4` no project, `5` bad config, `6` port in use. The generated systemd unit lists all of them under `RestartPreventExitStatus`.
+Exit codes tell a supervisor a misconfiguration from a crash:
 
-## Validating
+| Code | Meaning |
+| --- | --- |
+| 2 | Usage error |
+| 3 | No Godot found |
+| 4 | No project found |
+| 5 | Bad config |
+| 6 | Port in use |
 
-```bash
-tests/selftest.sh
-```
+The generated systemd unit lists them under `RestartPreventExitStatus`.
 
-`tests/selftest.sh` is the suite. Nothing starts a real server, because the launcher's whole job is what happens *before* one does, and `--dry-run` and `--print-config` exist so that is checkable. A fake `godot` on `PATH` stands in for the engine, so the suite runs on a machine that has none.
+## Testing
+
+Run `tests/selftest.sh`. It does not start a real server: a fake `godot` on `PATH` stands in for the engine, so it runs on a machine that has none.
 
 ## Licence
 
-MIT. See [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE). Part of the TMC [dot-*](https://github.com/modcommunity) family of tools. Written with Claude Code and maintained by `gamemann`. It has its own test suite, but little of it has been used by real users yet, so please [open an issue](https://github.com/modcommunity/dot-serve/issues) when you hit a rough edge.
