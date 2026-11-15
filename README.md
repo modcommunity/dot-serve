@@ -1,4 +1,4 @@
-`dotserve` starts a [dot-server](https://github.com/modcommunity/dot-server) for you without you needing to know how dot-server works. It is a shell script, not a Godot addon. It needs `bash` and a Godot 4.7+ binary.
+`dotserve` starts a [dot-server](https://github.com/gamespice-platform/server) for you without you needing to know how dot-server works. It is a shell script, not a Godot addon. It needs `bash` and a Godot 4.7+ binary.
 
 dot-server is very configurable (cvars, flags, `server.cfg`, `autoexec.cfg`, `+command` arguments, RCON, layered config from file, environment and command line). `dotserve` is the easy way in.
 
@@ -60,4 +60,4 @@ Run `tests/selftest.sh`. It does not start a real server: a fake `godot` on `PAT
 
 ## Licence
 
-MIT, see [LICENSE](LICENSE). Part of the TMC [dot-*](https://github.com/modcommunity) family of tools. Written with Claude Code and maintained by `gamemann`. It has its own test suite, but little of it has been used by real users yet, so please [open an issue](https://github.com/modcommunity/dot-serve/issues) when you hit a rough edge.
+MIT, see [LICENSE](LICENSE). Part of the TMC [dot-*](https://github.com/gamespice-platform) family of tools. Written with Claude Code and maintained by `gamemann`. It has its own test suite, but little of it has been used by real users yet, so please [open an issue](https://github.com/gamespice-platform/serve/issues) when you hit a rough edge.
