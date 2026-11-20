@@ -1,6 +1,6 @@
-# dot-serve
+# GameSpice Serve
 
-The `dotserve` launcher: a bash script that finds a Godot binary and a project, writes a commented `server.cfg` once, refuses a guessable RCON password, prints the join addresses, and execs a headless dot-server. It is not a Godot project; most family rules about GDScript do not apply. A launcher, not a framework: server behaviour belongs in dot-server.
+The `dotserve` launcher: a bash script that finds a Godot binary and a project, writes a commented `server.cfg` once, refuses a guessable RCON password, prints the join addresses, and execs a headless GameSpice Server. It is not a Godot project; most family rules about GDScript do not apply. A launcher, not a framework: server behaviour belongs in GameSpice Server.
 
 Read the family [CLAUDE.md](../../CLAUDE.md) for context.
 
@@ -40,9 +40,9 @@ Exits non-zero on any failure. Run it after any change: two of its checks exist 
 - Under `set -u`, never refer to a `local` declared on the same line. [history](docs/history.md#one-local-line-cannot-use-its-own-earlier-assignment-under-set--u)
 - A check that must stop the run is called directly, never inside `$(...)`. [history](docs/history.md#a-check-inside-a-command-substitution-cannot-stop-the-script)
 
-## Flags reach dot-server
+## Flags reach GameSpice Server
 
-- **Server settings are passed as `--sv-<key>`, spelled as `DotServerConfig`'s `@export`** (`--sv-max-players`, `--sv-transport-mode`), and the game as `+changegame`. dot-core's `apply_cli` skips any other prefix in silence; `tests/selftest.sh` checks flag and value together for that reason. [history](docs/history.md)
+- **Server settings are passed as `--sv-<key>`, spelled as `DotServerConfig`'s `@export`** (`--sv-max-players`, `--sv-transport-mode`), and the game as `+changegame`. GameSpice Core's `apply_cli` skips any other prefix in silence; `tests/selftest.sh` checks flag and value together for that reason. [history](docs/history.md)
 
 ## Open items
 

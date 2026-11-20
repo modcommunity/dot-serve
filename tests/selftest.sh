@@ -302,7 +302,7 @@ test_command_building() {
   check_contains "$out" "$TMP/project" "in the right project"
   # Flag AND value, spelled the way DotServerConfig reads them. These checks used to
   # look for "27044" anywhere in the line, which a --server-port passed for as long as it
-  # existed while dot-server ignored every one of them: its prefix is --sv-, and
+  # existed while GameSpice Server ignored every one of them: its prefix is --sv-, and
   # DotConfig.apply_cli skips an argument without it in silence.
   check_contains "$out" "--sv-port 27044" "on the right port, as dot-server reads it"
   check_contains "$out" "--sv-max-players 24" "with the right player count"
@@ -313,7 +313,7 @@ test_command_building() {
   check_missing "$out" "--server-" "and no flag dot-server would skip in silence"
 
   # The RCON password must never reach a command line: argv is readable by every
-  # other process on the machine, and it ends up in pasted bug reports. dot-server's
+  # other process on the machine, and it ends up in pasted bug reports. GameSpice Server's
   # own DotConfig refuses secrets from argv for the same reason.
   local password
   password="$(sed -n 's/^rcon_password "\(.*\)"$/\1/p' "$TMP/config/server.cfg" || true)"

@@ -1,4 +1,4 @@
-# dot-serve design
+# GameSpice Serve design
 
 Why the launcher does what it does, and what it deliberately leaves out. The one-line rules are in [CLAUDE.md](../CLAUDE.md).
 
@@ -30,7 +30,7 @@ That means the one thing **not** covered is whether dot-server actually accepts 
 ## Things deliberately not here
 
 - **Downloading Godot.** It finds one; it does not fetch one. A launcher that downloads a binary is a launcher that has to verify a signature, and that is a different program with different risks.
-- **Reading `server.cfg` for anything but `rcon_password`.** `read_cfg_value` is deliberately a one-key `sed` and not a config parser. dot-server's console is the parser, and a second one here would drift from it.
+- **Reading `server.cfg` for anything but `rcon_password`.** `read_cfg_value` is deliberately a one-key `sed` and not a config parser. GameSpice Server's console is the parser, and a second one here would drift from it.
 - **Server listing registration.** Announcing a server to the backbone is dot-auth's `DotBackboneClient` and a running server's job, not a launcher's.
 - **Multi-instance management.** One invocation, one server. Running four is four systemd units with four `--config` directories, which is what `--install-service NAME` is for.
 - **Log rotation.** `--log` names a directory and the server writes into it. Rotation is `logrotate`'s job and doing it badly here would fight it.
